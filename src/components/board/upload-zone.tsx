@@ -198,15 +198,39 @@ export function UploadZone({ onDrop, uploading, progress, compact = false, skipp
           )}
         </AnimatePresence>
 
-        {/* Upload button */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className="flex items-center gap-2 px-4 h-8 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-all disabled:opacity-50 cursor-pointer shadow-[0_0_15px_rgba(5,109,250,0.15)]"
-        >
-          <Upload className="w-3.5 h-3.5" />
-          Upload
-        </button>
+        {/* Upload button with remaining count */}
+        <div className="flex items-center gap-2">
+          {uploadsRemaining !== undefined && uploadsRemaining !== Infinity && uploadsRemaining <= 0 ? (
+            <button
+              onClick={() => {
+                // Trigger upgrade modal via a custom event the parent can listen to
+                window.dispatchEvent(new CustomEvent('moodboard:upgrade', { detail: { trigger: 'upload_limit' } }));
+              }}
+              className="flex items-center gap-2 px-4 h-8 text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-all cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Limit reached
+            </button>
+          ) : (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-2 px-4 h-8 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-all disabled:opacity-50 cursor-pointer shadow-[0_0_15px_rgba(5,109,250,0.15)]"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Upload
+              {uploadsRemaining !== undefined && uploadsRemaining !== Infinity && uploadsRemaining <= 10 && (
+                <span className={`ml-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                  uploadsRemaining <= 5
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : 'bg-white/10 text-white/50'
+                }`}>
+                  {uploadsRemaining}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
 
         {/* Upload progress toast */}
         <AnimatePresence>

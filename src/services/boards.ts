@@ -10,26 +10,13 @@ export const boardsService = {
       .select('*')
       .order('updated_at', { ascending: false });
     if (error) throw toError(error);
-
     if (!boards || boards.length === 0) return [];
-    const boardList = boards as Board[];
 
-    // Get actual image counts per board in one query
-    const { data: counts } = await supabase
-      .from('images')
-      .select('board_id')
-      .in('board_id', boardList.map((b) => b.id));
-
-    const countMap: Record<string, number> = {};
-    const countRows = (counts ?? []) as { board_id: string }[];
-    for (const row of countRows) {
-      countMap[row.board_id] = (countMap[row.board_id] || 0) + 1;
-    }
-
-    return boardList.map((b) => ({
+    // image_count is maintained on the board row by upload/delete operations
+    return (boards as Board[]).map((b) => ({
       ...b,
-      image_count: countMap[b.id] || 0,
-    })) as Board[];
+      image_count: b.image_count || 0,
+    }));
   },
 
   async get(id: string): Promise<Board | null> {

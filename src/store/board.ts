@@ -106,8 +106,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   // Data
   setImages: (images) => set({ images, loading: false }),
-  addImage: (image) => set((s) => ({ images: [image, ...s.images] })),
-  addImages: (images) => set((s) => ({ images: [...images, ...s.images] })),
+  addImage: (image) =>
+    set((s) => {
+      if (s.images.some((img) => img.id === image.id)) return s;
+      return { images: [image, ...s.images] };
+    }),
+  addImages: (images) =>
+    set((s) => {
+      const existingIds = new Set(s.images.map((img) => img.id));
+      const newOnes = images.filter((img) => !existingIds.has(img.id));
+      if (newOnes.length === 0) return s;
+      return { images: [...newOnes, ...s.images] };
+    }),
   updateImage: (id, updates) =>
     set((s) => ({
       images: s.images.map((img) => (img.id === id ? { ...img, ...updates } : img)),

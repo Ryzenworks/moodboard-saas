@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/auth';
 import { useSubscriptionStore } from '@/store/subscription';
@@ -8,16 +8,22 @@ import { subscriptionService } from '@/services/subscription';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const setUser = useAuthStore((s) => s.setUser);
-  const setLoading = useAuthStore((s) => s.setLoading);
   const setSubscription = useSubscriptionStore((s) => s.setSubscription);
   const setUsage = useSubscriptionStore((s) => s.setUsage);
+  const initRef = useRef(false);
 
   useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
+
     const supabase = createClient();
 
-    // Get initial session
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (user) {
+    // FAST PATH: Use getSession() for initial render — reads from local storage (0ms).
+    // The middleware already validated the session server-side via getUser(),
+    // so the client doesn't need to repeat that network call.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const user = session.user;
         setUser({
           id: user.id,
           email: user.email ?? '',
@@ -25,36 +31,56 @@ export function Providers({ children }: { children: React.ReactNode }) {
           avatarUrl: user.user_metadata?.avatar_url ?? null,
         });
 
-        // Load subscription + usage
-        try {
-          const [sub, usage] = await Promise.all([
-            subscriptionService.getOrCreate(user.id),
-            subscriptionService.getUsage(user.id),
-          ]);
-          setSubscription({
-            plan: sub.plan,
-            status: sub.status,
-            razorpaySubscriptionId: sub.razorpay_subscription_id,
-            currentPeriodEnd: sub.current_period_end,
-          });
+        // Load subscription + usage in parallel — non-blocking
+        loadSubscription(user.id);
+      } else {
+        setUser(null);
+      }
+    });
+
+    // Background subscription loader — uses get() not getOrCreate()
+    // Subscription is created by DB trigger on signup, no upsert needed
+    function loadSubscription(userId: string) {
+      Promise.all([
+        subscriptionService.get(userId),
+        subscriptionService.getUsage(userId),
+      ])
+        .then(([sub, usage]) => {
+          if (sub) {
+            setSubscription({
+              plan: sub.plan,
+              status: sub.status,
+              razorpaySubscriptionId: sub.razorpay_subscription_id,
+              currentPeriodEnd: sub.current_period_end,
+            });
+          } else {
+            // No subscription row — keep free defaults
+            setSubscription({
+              plan: 'free',
+              status: 'active',
+              razorpaySubscriptionId: null,
+              currentPeriodEnd: null,
+            });
+          }
           setUsage(usage.boards, usage.images);
-        } catch {
+        })
+        .catch(() => {
           setSubscription({
             plan: 'free',
             status: 'active',
             razorpaySubscriptionId: null,
             currentPeriodEnd: null,
           });
-        }
-      } else {
-        setUser(null);
-      }
-    });
+        });
+    }
 
-    // Listen for auth changes
+    // Listen for auth changes (sign-in, sign-out, token refresh)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // Only act on meaningful auth events
+      if (event === 'INITIAL_SESSION') return; // Already handled above
+
       if (session?.user) {
         setUser({
           id: session.user.id,
@@ -62,13 +88,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
           fullName: session.user.user_metadata?.full_name ?? null,
           avatarUrl: session.user.user_metadata?.avatar_url ?? null,
         });
+
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          loadSubscription(session.user.id);
+        }
       } else {
         setUser(null);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [setUser, setLoading, setSubscription, setUsage]);
+  }, [setUser, setSubscription, setUsage]);
 
   return <>{children}</>;
 }

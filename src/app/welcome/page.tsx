@@ -37,6 +37,11 @@ export default function WelcomePage() {
   const { status: extStatus, recheck: recheckExt } = useExtension();
   const [copied, setCopied] = useState(false);
 
+  // Prefetch dashboard route as early as possible
+  useEffect(() => {
+    router.prefetch('/boards');
+  }, [router]);
+
   // Check if onboarding is already complete
   useEffect(() => {
     if (!loading && !user) {
@@ -53,14 +58,12 @@ export default function WelcomePage() {
   function handleContinueFree() {
     if (!user || completing) return;
     setCompleting(true);
-    console.log('[Onboarding] Completing...');
 
     // Synchronous — sets cookie immediately (middleware reads this)
     profileService.completeOnboarding(user.id);
-    console.log('[Onboarding] Cookie set → redirecting to /boards');
 
-    // Redirect immediately — cookie ensures middleware won't bounce back
-    router.replace('/boards');
+    // Navigate immediately — prefetch cache makes this fast
+    router.push('/boards');
   }
 
   function handleUpgrade() {
@@ -81,6 +84,41 @@ export default function WelcomePage() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="w-5 h-5 border-2 border-white/20 border-t-accent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // ── Instant transition: show dashboard skeleton while navigating ──
+  if (completing) {
+    return (
+      <div className="min-h-screen bg-background flex animate-in fade-in duration-200">
+        {/* Sidebar skeleton */}
+        <aside className="w-[220px] bg-[#0a0a0a] border-r border-white/[0.06] flex flex-col flex-shrink-0">
+          <div className="h-14 flex items-center px-5 border-b border-white/[0.04]">
+            <div className="h-4 w-28 skeleton rounded" />
+          </div>
+          <div className="p-4 space-y-2 mt-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-9 skeleton rounded-lg" />
+            ))}
+          </div>
+        </aside>
+        {/* Main content skeleton */}
+        <main className="flex-1 flex flex-col">
+          <div className="h-14 border-b border-white/[0.04] flex items-center px-6 gap-4">
+            <div className="h-5 w-32 skeleton rounded" />
+            <div className="ml-auto h-8 w-24 skeleton rounded-lg" />
+          </div>
+          <div className="flex-1 p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="rounded-2xl overflow-hidden">
+                  <div className="h-40 skeleton" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
       </div>
     );
   }
@@ -342,7 +380,6 @@ export default function WelcomePage() {
                     'Real-time sync',
                   ]}
                   onSelect={handleContinueFree}
-                  loading={completing}
                   ctaLabel="Continue Free"
                 />
                 <PlanCard
@@ -430,11 +467,10 @@ export default function WelcomePage() {
                 </button>
                 <button
                   onClick={handleContinueFree}
-                  disabled={completing}
-                  className="h-[44px] flex items-center justify-center gap-2 px-6 rounded-xl bg-accent hover:bg-accent/90 text-white text-sm font-medium transition-all cursor-pointer disabled:opacity-50"
+                  className="h-[44px] flex items-center justify-center gap-2 px-6 rounded-xl bg-accent hover:bg-accent/90 text-white text-sm font-medium transition-all cursor-pointer"
                 >
-                  {completing ? 'Setting up...' : 'Start Creating'}
-                  {!completing && <ArrowRight className="w-4 h-4" />}
+                  Start Creating
+                  <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </motion.div>

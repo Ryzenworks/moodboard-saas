@@ -138,6 +138,13 @@ export default function BoardDetailPage() {
   // ─── Realtime sync (extension uploads appear instantly) ───
   useRealtimeBoard(boardId);
 
+  // ─── Listen for upgrade trigger from UploadZone ───
+  useEffect(() => {
+    function onUpgrade() { setUpgradeOpen(true); }
+    window.addEventListener('moodboard:upgrade', onUpgrade);
+    return () => window.removeEventListener('moodboard:upgrade', onUpgrade);
+  }, []);
+
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onSearch: () => searchRef.current?.focus(),
