@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { MoodboardLogo } from '@/components/ui/logo';
 
 export const metadata: Metadata = {
   title: 'Moodboard — Sign In',
@@ -18,7 +19,8 @@ export default function AuthLayout({
       </div>
 
       {/* Logo */}
-      <div className="mb-8 z-10">
+      <div className="mb-8 z-10 flex items-center gap-2.5">
+        <MoodboardLogo size={20} className="text-white/90" />
         <span className="text-sm font-semibold tracking-[0.2em] text-white/90 uppercase">
           Moodboard
         </span>

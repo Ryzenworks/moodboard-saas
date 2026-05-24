@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { BoardCard } from '@/components/boards/board-card';
 import { CreateBoardModal } from '@/components/boards/create-board-modal';
 import { UpgradeModal } from '@/components/billing/upgrade-modal';
+import { CapacityModal } from '@/components/billing/capacity-modal';
 import { boardsService } from '@/services/boards';
 import { useBoardsStore } from '@/store/boards';
 import { useAuthStore } from '@/store/auth';
@@ -20,6 +21,7 @@ const MemoizedBoardCard = memo(BoardCard);
 export default function BoardsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [capacityOpen, setCapacityOpen] = useState(false);
   const fetchedRef = useRef(false);
 
   const boards = useBoardsStore((s) => s.boards);
@@ -60,9 +62,13 @@ export default function BoardsPage() {
   }, []);
 
   function handleNewBoard() {
-    const { allowed } = checkBoardLimit();
-    if (!allowed) {
-      setUpgradeOpen(true);
+    const result = checkBoardLimit();
+    if (!result.allowed) {
+      if (result.reason === 'pro_capacity') {
+        setCapacityOpen(true);
+      } else {
+        setUpgradeOpen(true);
+      }
       return;
     }
     setModalOpen(true);
@@ -183,6 +189,12 @@ export default function BoardsPage() {
         open={upgradeOpen}
         onClose={() => setUpgradeOpen(false)}
         trigger="board_limit"
+      />
+
+      <CapacityModal
+        open={capacityOpen}
+        onClose={() => setCapacityOpen(false)}
+        type="boards"
       />
     </>
   );

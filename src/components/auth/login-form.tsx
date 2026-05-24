@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { OAuthButton } from './oauth-button';
 import { Mail, Lock } from 'lucide-react';
 
+const isDev = process.env.NODE_ENV === 'development';
+
 export function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,6 +18,13 @@ export function LoginForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     await signIn(email, password);
+  }
+
+  function handleDevLogin() {
+    setEmail('test@moodboard.dev');
+    setPassword('test123456');
+    // Auto-submit after a tick so state has time to update
+    setTimeout(() => signIn('test@moodboard.dev', 'test123456'), 50);
   }
 
   return (
@@ -74,6 +83,17 @@ export function LoginForm() {
           Sign In
         </Button>
       </form>
+
+      {/* Dev quick login — development only */}
+      {isDev && (
+        <button
+          type="button"
+          onClick={handleDevLogin}
+          className="w-full py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 font-mono hover:bg-amber-500/20 transition-colors cursor-pointer"
+        >
+          🛠 DEV: Quick Login (test@moodboard.dev)
+        </button>
+      )}
 
       {/* Footer */}
       <p className="text-center text-sm text-muted-foreground">

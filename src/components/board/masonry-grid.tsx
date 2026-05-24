@@ -41,9 +41,16 @@ export function MasonryGrid({
     return () => window.removeEventListener('resize', updateCols);
   }, []);
 
-  // Reset visible count when images change (filter/sort)
+  // Grow visible count when new images arrive (e.g. realtime inserts)
+  // Only hard-reset when images shrink significantly (filter/sort change)
   useEffect(() => {
-    setVisibleCount(BATCH_SIZE);
+    setVisibleCount((prev) => {
+      if (images.length <= BATCH_SIZE) return BATCH_SIZE;
+      // If images grew (new upload), show the new ones
+      if (images.length > prev) return images.length;
+      // If images shrunk significantly (filter/sort), reset
+      return BATCH_SIZE;
+    });
   }, [images.length]);
 
   // Infinite scroll via IntersectionObserver

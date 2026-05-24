@@ -16,6 +16,9 @@ export interface Database {
           full_name: string | null;
           avatar_url: string | null;
           plan: 'free' | 'pro';
+          onboarding_complete: boolean;
+          extension_token: string | null;
+          extension_token_created_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -25,6 +28,9 @@ export interface Database {
           full_name?: string | null;
           avatar_url?: string | null;
           plan?: 'free' | 'pro';
+          onboarding_complete?: boolean;
+          extension_token?: string | null;
+          extension_token_created_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -34,6 +40,9 @@ export interface Database {
           full_name?: string | null;
           avatar_url?: string | null;
           plan?: 'free' | 'pro';
+          onboarding_complete?: boolean;
+          extension_token?: string | null;
+          extension_token_created_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -169,6 +178,7 @@ export interface Database {
           razorpay_customer_id: string | null;
           status: string;
           current_period_end: string | null;
+          cancel_at_period_end: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -180,6 +190,7 @@ export interface Database {
           razorpay_customer_id?: string | null;
           status?: string;
           current_period_end?: string | null;
+          cancel_at_period_end?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -191,6 +202,7 @@ export interface Database {
           razorpay_customer_id?: string | null;
           status?: string;
           current_period_end?: string | null;
+          cancel_at_period_end?: boolean;
           created_at?: string;
           updated_at?: string;
         };

@@ -11,9 +11,11 @@ interface UploadZoneProps {
   progress: UploadProgress[];
   compact?: boolean;
   skippedCount?: number;
+  limitMessage?: string;
+  uploadsRemaining?: number;
 }
 
-export function UploadZone({ onDrop, uploading, progress, compact = false, skippedCount = 0 }: UploadZoneProps) {
+export function UploadZone({ onDrop, uploading, progress, compact = false, skippedCount = 0, limitMessage = '', uploadsRemaining }: UploadZoneProps) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -300,6 +302,20 @@ export function UploadZone({ onDrop, uploading, progress, compact = false, skipp
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Limit reached toast */}
+        <AnimatePresence>
+          {limitMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="fixed bottom-44 right-6 z-[150] px-4 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl backdrop-blur-xl shadow-lg"
+            >
+              <p className="text-xs text-amber-300">{limitMessage}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </>
     );
   }
@@ -341,6 +357,11 @@ export function UploadZone({ onDrop, uploading, progress, compact = false, skipp
           <p className="text-xs text-white/25">
             PNG, JPG, GIF, WebP — compressed automatically
           </p>
+          {uploadsRemaining !== undefined && uploadsRemaining !== Infinity && (
+            <p className={`text-[10px] mt-1 ${uploadsRemaining <= 5 ? 'text-amber-400/60' : 'text-white/15'}`}>
+              {uploadsRemaining > 0 ? `${uploadsRemaining} upload${uploadsRemaining !== 1 ? 's' : ''} remaining` : 'Upload limit reached — upgrade to Pro'}
+            </p>
+          )}
         </div>
       </div>
     </div>

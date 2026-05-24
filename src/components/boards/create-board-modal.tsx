@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sparkles, Check } from 'lucide-react';
+import { X, Check } from 'lucide-react';
+import { MoodboardLogo } from '@/components/ui/logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BOARD_COLORS, type BoardColor } from '@/utils/board-colors';
@@ -60,7 +61,7 @@ export function CreateBoardModal({ open, onClose, onCreate }: CreateBoardModalPr
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-accent" />
+                <MoodboardLogo size={16} className="text-accent" />
                 <h2 className="text-sm font-semibold">New Board</h2>
               </div>
               <button

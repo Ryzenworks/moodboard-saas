@@ -28,13 +28,14 @@ import { useBoardsStore } from '@/store/boards';
 import { NoteModal } from '@/components/ui/note-modal';
 import { PromptModal } from '@/components/ui/prompt-modal';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
+import { useRealtimeBoard } from '@/hooks/use-realtime-board';
 import type { Board, Category } from '@/types';
 
 export default function BoardDetailPage() {
   const params = useParams();
   const boardId = params.id as string;
   const user = useAuthStore((s) => s.user);
-  const { checkUploadLimit } = usePlan();
+  const { checkUploadLimit, trimUploadBatch, uploadsRemaining } = usePlan();
   const incrementImageCount = useSubscriptionStore((s) => s.incrementImageCount);
   const updateBoardInList = useBoardsStore((s) => s.updateBoard);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -134,6 +135,9 @@ export default function BoardDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId]);
 
+  // ─── Realtime sync (extension uploads appear instantly) ───
+  useRealtimeBoard(boardId);
+
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onSearch: () => searchRef.current?.focus(),
@@ -155,6 +159,7 @@ export default function BoardDetailPage() {
   // ─── Upload (dedup + concurrency queue) ─────────────
   const MAX_CONCURRENT = 3;
   const [skippedCount, setSkippedCount] = useState(0);
+  const [limitMessage, setLimitMessage] = useState('');
 
   // In-flight lock — prevents concurrent uploads of the same fingerprint
   const inflightFingerprints = useRef(new Set<string>());
@@ -174,11 +179,6 @@ export default function BoardDetailPage() {
   const handleUpload = useCallback(
     async (files: File[]) => {
       if (!user || uploading) return;
-      const { allowed } = checkUploadLimit();
-      if (!allowed) {
-        setUpgradeOpen(true);
-        return;
-      }
 
       // ── Phase 1: Fast dedup (in-batch + store + in-flight) ──
       const batchSeen = new Set<string>();
@@ -230,16 +230,38 @@ export default function BoardDetailPage() {
       }
       if (unique.length === 0) return;
 
+      // ── Phase 3: Plan limit enforcement (Option A — partial upload) ──
+      const trimResult = trimUploadBatch(unique.map(u => u.file));
+      if (trimResult.allowed.length === 0) {
+        // Fully blocked
+        setUpgradeOpen(true);
+        if (trimResult.message) {
+          setLimitMessage(trimResult.message);
+          setTimeout(() => setLimitMessage(''), 5000);
+        }
+        return;
+      }
+
+      // Trim the unique array to only allowed files
+      let trimmed = unique;
+      if (trimResult.rejected > 0) {
+        const allowedNames = new Set(trimResult.allowed.map(f => f.name));
+        trimmed = unique.filter(u => allowedNames.has(u.file.name)).slice(0, trimResult.allowed.length);
+        const msg = trimResult.message || `${trimResult.allowed.length} uploaded · ${trimResult.rejected} skipped (limit reached)`;
+        setLimitMessage(msg);
+        setTimeout(() => setLimitMessage(''), 5000);
+      }
+
       setUploading(true);
       const progressMap: Record<string, UploadProgress> = {};
       let lastProgressUpdate = 0;
 
-      for (const { file } of unique) {
+      for (const { file } of trimmed) {
         progressMap[file.name] = { filename: file.name, progress: 0, status: 'pending' };
       }
       setUploadProgress(Object.values(progressMap));
 
-      // ── Phase 3: Concurrency-limited queue ──
+      // ── Phase 4: Concurrency-limited queue ──
       let nextIdx = 0;
       let active = 0;
       let completed = 0;
@@ -294,11 +316,11 @@ export default function BoardDetailPage() {
       }
 
       function processQueue() {
-        while (active < MAX_CONCURRENT && nextIdx < unique.length) {
-          const item = unique[nextIdx++];
+        while (active < MAX_CONCURRENT && nextIdx < trimmed.length) {
+          const item = trimmed[nextIdx++];
           processOne(item);
         }
-        if (completed >= unique.length) {
+        if (completed >= trimmed.length) {
           setTimeout(() => setUploadProgress([]), 2000);
           setUploading(false);
         }
@@ -306,7 +328,7 @@ export default function BoardDetailPage() {
 
       processQueue();
     },
-    [user, boardId, uploading, addImage, updateImage, checkUploadLimit, updateBoardInList, incrementImageCount]
+    [user, boardId, uploading, addImage, updateImage, trimUploadBatch, updateBoardInList, incrementImageCount]
   );
 
   // ─── Clipboard paste upload (Ctrl/Cmd + V) ─────────
@@ -499,7 +521,7 @@ export default function BoardDetailPage() {
         actions={
           <div className="flex items-center gap-2">
             <SortControl />
-            <UploadZone onDrop={handleUpload} uploading={uploading} progress={uploadProgress} skippedCount={skippedCount} compact />
+            <UploadZone onDrop={handleUpload} uploading={uploading} progress={uploadProgress} skippedCount={skippedCount} limitMessage={limitMessage} uploadsRemaining={uploadsRemaining} compact />
           </div>
         }
       />
@@ -548,7 +570,7 @@ export default function BoardDetailPage() {
             ))}
           </div>
         ) : images.length === 0 ? (
-          <UploadZone onDrop={handleUpload} uploading={uploading} progress={uploadProgress} />
+          <UploadZone onDrop={handleUpload} uploading={uploading} progress={uploadProgress} uploadsRemaining={uploadsRemaining} />
         ) : displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-sm text-white/30 mb-2">No images match your filters</p>

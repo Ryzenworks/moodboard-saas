@@ -9,9 +9,9 @@ import {
   Settings,
   CreditCard,
   LogOut,
-  Sparkles,
   Zap,
 } from 'lucide-react';
+import { MoodboardLogo } from '@/components/ui/logo';
 import { useAuth } from '@/hooks/use-auth';
 import { useAuthStore } from '@/store/auth';
 import { useSubscriptionStore } from '@/store/subscription';
@@ -39,7 +39,7 @@ export function Sidebar() {
       {/* Logo */}
       <div className="h-14 flex items-center justify-between px-5 border-b border-white/[0.04]">
         <Link href="/boards" className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-accent" />
+          <MoodboardLogo size={16} className="text-white/90" />
           <span className="text-xs font-semibold tracking-[0.18em] text-white/90 uppercase">
             Moodboard
           </span>

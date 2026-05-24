@@ -77,13 +77,11 @@ export default function BillingPage() {
               price="Free"
               current={plan === 'free'}
               features={[
-                `${PLAN_LIMITS.free.maxBoards} boards`,
+                `${PLAN_LIMITS.free.maxBoards} board`,
                 `${PLAN_LIMITS.free.maxUploads} uploads`,
                 `${PLAN_LIMITS.free.maxStorageMB} MB storage`,
-                'Masonry grid layout',
-                'Category organization',
-                'Color palette extraction',
-                'Drag & drop uploads',
+                'Browser extension',
+                'Real-time sync',
               ]}
             />
             <PlanCard
@@ -94,13 +92,11 @@ export default function BillingPage() {
               recommended={plan === 'free'}
               onSelect={() => setUpgradeOpen(true)}
               features={[
-                'Unlimited boards',
+                'Up to 10 boards',
                 'Unlimited uploads',
                 'Unlimited storage',
-                'Everything in Free',
+                'Multi-board workflow',
                 'Priority support',
-                'Advanced analytics',
-                'Custom branding (coming soon)',
               ]}
             />
           </div>

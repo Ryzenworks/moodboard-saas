@@ -29,12 +29,12 @@ export interface PlanLimits {
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   free: {
-    maxBoards: 3,
+    maxBoards: 1,
     maxUploads: 50,
     maxStorageMB: 500,
   },
   pro: {
-    maxBoards: Infinity,
+    maxBoards: 10,
     maxUploads: Infinity,
     maxStorageMB: Infinity,
   },

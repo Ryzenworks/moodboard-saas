@@ -31,6 +31,7 @@ interface SubscriptionState {
   canUploadImage: () => boolean;
   isProActive: () => boolean;
   getUsagePercent: (type: 'boards' | 'uploads') => number;
+  getRemainingUploads: () => number;
 }
 
 export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
@@ -83,5 +84,11 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       return limits.maxBoards === Infinity ? 0 : (s.boardCount / limits.maxBoards) * 100;
     }
     return limits.maxUploads === Infinity ? 0 : (s.imageCount / limits.maxUploads) * 100;
+  },
+  getRemainingUploads: () => {
+    const s = get();
+    const limits = PLAN_LIMITS[s.plan];
+    if (limits.maxUploads === Infinity) return Infinity;
+    return Math.max(0, limits.maxUploads - s.imageCount);
   },
 }));

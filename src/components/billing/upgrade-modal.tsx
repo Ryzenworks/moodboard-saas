@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Zap, Check, Shield } from 'lucide-react';
+import { X, Zap, Check, Shield, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { subscriptionService } from '@/services/subscription';
 import { useSubscriptionStore } from '@/store/subscription';
@@ -12,7 +12,7 @@ declare global {
   interface Window {
     Razorpay: new (options: Record<string, unknown>) => {
       open: () => void;
-      on: (event: string, callback: () => void) => void;
+      on: (event: string, callback: (response: Record<string, unknown>) => void) => void;
     };
   }
 }
@@ -24,21 +24,19 @@ interface UpgradeModalProps {
 }
 
 const PRO_FEATURES = [
-  'Unlimited boards',
+  'Up to 10 boards',
   'Unlimited uploads',
   'Unlimited storage',
+  'Multi-board workflow',
   'Priority support',
-  'Advanced analytics',
-  'Custom branding',
 ];
 
-/** Lazily inject Razorpay checkout.js — only when needed, never during SSR */
+/** Lazily inject Razorpay checkout.js */
 function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') return reject(new Error('SSR'));
     if (window.Razorpay) return resolve();
     if (document.querySelector('script[src*="checkout.razorpay.com"]')) {
-      // Already loading, wait for it
       const check = setInterval(() => {
         if (window.Razorpay) { clearInterval(check); resolve(); }
       }, 100);
@@ -56,15 +54,20 @@ function loadRazorpayScript(): Promise<void> {
 
 export function UpgradeModal({ open, onClose, trigger }: UpgradeModalProps) {
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const user = useAuthStore((s) => s.user);
-  const setPlan = useSubscriptionStore((s) => s.setPlan);
+  const setSubscription = useSubscriptionStore((s) => s.setSubscription);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Preload script when modal opens
+  // Preload Razorpay script when modal opens
   useEffect(() => {
     if (open) {
       loadRazorpayScript().catch(() => {});
     }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [open]);
 
   const triggerMessages: Record<string, string> = {
@@ -72,30 +75,68 @@ export function UpgradeModal({ open, onClose, trigger }: UpgradeModalProps) {
     upload_limit: "You've reached the maximum uploads on the Free plan.",
   };
 
+  /**
+   * Poll /api/razorpay/status until plan becomes 'pro'.
+   * Webhooks are the source of truth — this syncs the client after payment.
+   */
+  const pollForUpgrade = useCallback(async () => {
+    setSyncing(true);
+    let attempts = 0;
+    const maxAttempts = 15; // 15 × 2s = 30s max wait
+
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      try {
+        const status = await subscriptionService.refreshStatus();
+        if (status.plan === 'pro') {
+          // ✅ Webhook has processed — sync store
+          if (pollRef.current) clearInterval(pollRef.current);
+          setSubscription({
+            plan: 'pro',
+            status: status.status,
+            razorpaySubscriptionId: status.razorpaySubscriptionId,
+            currentPeriodEnd: status.currentPeriodEnd,
+          });
+          setSyncing(false);
+          setLoading(false);
+          onClose();
+        } else if (attempts >= maxAttempts) {
+          // Timeout — webhook might be delayed
+          if (pollRef.current) clearInterval(pollRef.current);
+          setSyncing(false);
+          setLoading(false);
+          // Optimistic upgrade — webhook will confirm
+          setSubscription({
+            plan: 'pro',
+            status: 'active',
+            razorpaySubscriptionId: null,
+            currentPeriodEnd: null,
+          });
+          onClose();
+        }
+      } catch {
+        // Network error — keep polling
+      }
+    }, 2000);
+  }, [setSubscription, onClose]);
+
   const handleUpgrade = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
 
     try {
-      // Get Razorpay plan ID from env
-      const planId = process.env.NEXT_PUBLIC_RAZORPAY_PLAN_ID;
-      if (!planId) {
-        setError('Payment configuration is not set up yet. Please contact support.');
-        setLoading(false);
-        return;
-      }
+      // Create subscription on server (server knows the plan)
+      const { subscriptionId, keyId } = await subscriptionService.createCheckout();
 
-      const { subscriptionId } = await subscriptionService.createCheckout(planId);
-
-      // Ensure Razorpay script is loaded
+      // Load Razorpay checkout script
       await loadRazorpayScript();
 
       const options: Record<string, unknown> = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        key: keyId,
         subscription_id: subscriptionId,
         name: 'Moodboard Pro',
-        description: 'Pro Plan - Monthly Subscription',
+        description: 'Pro Plan — ₹499/month',
         theme: {
           color: '#056dfa',
           backdrop_color: 'rgba(0,0,0,0.85)',
@@ -105,14 +146,13 @@ export function UpgradeModal({ open, onClose, trigger }: UpgradeModalProps) {
           name: user.fullName || '',
         },
         handler: () => {
-          // Payment successful — webhook will update the plan
-          setPlan('pro');
-          onClose();
-          // Reload to get fresh data
-          window.location.reload();
+          // Payment successful — poll for webhook confirmation
+          pollForUpgrade();
         },
         modal: {
-          ondismiss: () => setLoading(false),
+          ondismiss: () => {
+            setLoading(false);
+          },
         },
         notes: {
           user_id: user.id,
@@ -129,7 +169,7 @@ export function UpgradeModal({ open, onClose, trigger }: UpgradeModalProps) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setLoading(false);
     }
-  }, [user, setPlan, onClose]);
+  }, [user, pollForUpgrade]);
 
   return (
     <AnimatePresence>
@@ -207,16 +247,23 @@ export function UpgradeModal({ open, onClose, trigger }: UpgradeModalProps) {
                 </div>
               )}
 
-              <Button
-                fullWidth
-                size="lg"
-                loading={loading}
-                onClick={handleUpgrade}
-                className="shadow-[0_0_30px_rgba(5,109,250,0.2)]"
-              >
-                <Zap className="w-4 h-4" />
-                Subscribe to Pro
-              </Button>
+              {syncing ? (
+                <div className="flex items-center justify-center gap-2 py-3 text-sm text-accent">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Activating your Pro plan...
+                </div>
+              ) : (
+                <Button
+                  fullWidth
+                  size="lg"
+                  loading={loading}
+                  onClick={handleUpgrade}
+                  className="shadow-[0_0_30px_rgba(5,109,250,0.2)]"
+                >
+                  <Zap className="w-4 h-4" />
+                  Subscribe to Pro
+                </Button>
+              )}
 
               <div className="flex items-center justify-center gap-1.5 mt-3 text-[10px] text-white/25">
                 <Shield className="w-3 h-3" />

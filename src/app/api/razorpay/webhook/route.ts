@@ -1,103 +1,193 @@
-import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 
-// Use service role for webhook (no user session)
+/**
+ * POST /api/razorpay/webhook
+ *
+ * Handles Razorpay subscription lifecycle events.
+ * This is the SOURCE OF TRUTH for plan state.
+ *
+ * Handled events:
+ *   subscription.activated  → Pro active
+ *   subscription.charged    → Pro active (renewal)
+ *   subscription.cancelled  → Cancel at period end
+ *   subscription.expired    → Downgrade to Free
+ *   subscription.halted     → Downgrade to Free
+ *   subscription.paused     → Mark paused
+ *   subscription.resumed    → Pro active
+ *   payment.failed          → Log (don't downgrade immediately)
+ *
+ * Security:
+ *   - Signature verification (fail-closed in production)
+ *   - DEV bypass when RAZORPAY_WEBHOOK_SECRET is empty
+ *   - Idempotent upserts (safe for Razorpay retries)
+ */
+
+// Admin client — webhooks have no user session
 const supabaseAdmin = createAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 function verifySignature(body: string, signature: string, secret: string): boolean {
-  const expectedSignature = crypto
+  const expected = crypto
     .createHmac('sha256', secret)
     .update(body)
     .digest('hex');
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expected)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.text();
-    const signature = request.headers.get('x-razorpay-signature');
+  const body = await request.text();
+  const signature = request.headers.get('x-razorpay-signature');
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-    // Verify webhook signature
-    if (process.env.RAZORPAY_WEBHOOK_SECRET && signature) {
-      const isValid = verifySignature(
-        body,
-        signature,
-        process.env.RAZORPAY_WEBHOOK_SECRET
-      );
-      if (!isValid) {
-        console.error('Invalid Razorpay webhook signature');
-        return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
-      }
+  // ── Signature verification ──
+  if (webhookSecret) {
+    // Production: verify signature
+    if (!signature) {
+      console.error('[Webhook] Missing x-razorpay-signature header');
+      return json({ error: 'Missing signature' }, 401);
     }
 
-    const event = JSON.parse(body);
-    const eventType = event.event;
-    const payload = event.payload;
+    if (!verifySignature(body, signature, webhookSecret)) {
+      console.error('[Webhook] ❌ Invalid signature');
+      return json({ error: 'Invalid signature' }, 401);
+    }
 
-    console.log(`Razorpay webhook: ${eventType}`);
+    console.log('[Webhook] ✅ Signature verified');
+  } else {
+    // DEV mode: allow without signature (log warning)
+    console.warn('[Webhook] ⚠️ DEV MODE — No RAZORPAY_WEBHOOK_SECRET configured, skipping signature verification');
+  }
 
+  // ── Parse event ──
+  let event: { event: string; payload: Record<string, { entity: Record<string, unknown> }> };
+  try {
+    event = JSON.parse(body);
+  } catch {
+    console.error('[Webhook] Invalid JSON body');
+    return json({ error: 'Invalid JSON' }, 400);
+  }
+
+  const eventType = event.event;
+  const payload = event.payload;
+
+  console.log(`[Webhook] Event: ${eventType}`);
+
+  try {
     switch (eventType) {
+      // ── Subscription activated / renewed ──
       case 'subscription.activated':
-      case 'subscription.charged': {
-        const subscription = payload.subscription?.entity;
-        if (!subscription) break;
+      case 'subscription.charged':
+      case 'subscription.resumed': {
+        const sub = payload.subscription?.entity;
+        if (!sub) break;
 
-        const userId = subscription.notes?.user_id;
+        const userId = (sub.notes as Record<string, string>)?.user_id;
         if (!userId) {
-          console.error('No user_id in subscription notes');
+          console.error('[Webhook] No user_id in subscription notes');
           break;
         }
 
-        // Update subscription in database
-        await supabaseAdmin
-          .from('subscriptions')
-          .upsert(
-            {
-              user_id: userId,
-              plan: 'pro',
-              status: 'active',
-              razorpay_subscription_id: subscription.id,
-              razorpay_customer_id: subscription.customer_id || null,
-              current_period_end: subscription.current_end
-                ? new Date(subscription.current_end * 1000).toISOString()
-                : null,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'user_id' }
-          );
+        const currentEnd = sub.current_end
+          ? new Date((sub.current_end as number) * 1000).toISOString()
+          : null;
 
-        // Update profile plan
-        await supabaseAdmin
+        // Upsert subscription — idempotent (safe for retries)
+        const { error: subErr } = await supabaseAdmin
+          .from('subscriptions')
+          .upsert({
+            user_id: userId,
+            plan: 'pro',
+            status: 'active',
+            razorpay_subscription_id: sub.id as string,
+            razorpay_customer_id: (sub.customer_id as string) || null,
+            current_period_end: currentEnd,
+            cancel_at_period_end: false,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_id' });
+
+        if (subErr) {
+          console.error('[Webhook] Subscription upsert failed:', subErr);
+        }
+
+        // Update profile plan (dual-write for fast reads)
+        const { error: profErr } = await supabaseAdmin
           .from('profiles')
           .update({ plan: 'pro', updated_at: new Date().toISOString() })
           .eq('id', userId);
 
-        console.log(`User ${userId} upgraded to Pro`);
+        if (profErr) {
+          console.error('[Webhook] Profile update failed:', profErr);
+        }
+
+        console.log(`[Webhook] ✅ User ${userId.slice(0, 8)}... → Pro (${eventType})`);
         break;
       }
 
-      case 'subscription.cancelled':
-      case 'subscription.expired':
-      case 'subscription.halted': {
-        const subscription = payload.subscription?.entity;
-        if (!subscription) break;
+      // ── Subscription cancelled (but still active until period end) ──
+      case 'subscription.cancelled': {
+        const sub = payload.subscription?.entity;
+        if (!sub) break;
 
-        const userId = subscription.notes?.user_id;
+        const userId = (sub.notes as Record<string, string>)?.user_id;
         if (!userId) break;
 
-        // Downgrade to free
+        const endDate = sub.current_end
+          ? new Date((sub.current_end as number) * 1000).toISOString()
+          : sub.ended_at
+            ? new Date((sub.ended_at as number) * 1000).toISOString()
+            : null;
+
+        // Mark as cancelled but keep Pro access until period end
+        await supabaseAdmin
+          .from('subscriptions')
+          .update({
+            status: 'cancelled',
+            cancel_at_period_end: true,
+            current_period_end: endDate,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId);
+
+        // Keep plan as 'pro' until period end — a cron or the next
+        // webhook (expired/halted) will downgrade when the time comes.
+        console.log(`[Webhook] ⚠️ User ${userId.slice(0, 8)}... cancelled (access until ${endDate})`);
+        break;
+      }
+
+      // ── Subscription expired / halted (no more access) ──
+      case 'subscription.expired':
+      case 'subscription.halted': {
+        const sub = payload.subscription?.entity;
+        if (!sub) break;
+
+        const userId = (sub.notes as Record<string, string>)?.user_id;
+        if (!userId) break;
+
+        // Downgrade to Free
         await supabaseAdmin
           .from('subscriptions')
           .update({
             plan: 'free',
-            status: eventType === 'subscription.cancelled' ? 'cancelled' : 'expired',
+            status: eventType === 'subscription.expired' ? 'expired' : 'halted',
+            cancel_at_period_end: false,
             updated_at: new Date().toISOString(),
           })
           .eq('user_id', userId);
@@ -107,26 +197,46 @@ export async function POST(request: Request) {
           .update({ plan: 'free', updated_at: new Date().toISOString() })
           .eq('id', userId);
 
-        console.log(`User ${userId} downgraded to Free (${eventType})`);
+        console.log(`[Webhook] 🔻 User ${userId.slice(0, 8)}... → Free (${eventType})`);
         break;
       }
 
+      // ── Subscription paused ──
+      case 'subscription.paused': {
+        const sub = payload.subscription?.entity;
+        if (!sub) break;
+
+        const userId = (sub.notes as Record<string, string>)?.user_id;
+        if (!userId) break;
+
+        await supabaseAdmin
+          .from('subscriptions')
+          .update({
+            status: 'paused',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId);
+
+        console.log(`[Webhook] ⏸ User ${userId.slice(0, 8)}... paused`);
+        break;
+      }
+
+      // ── Payment failed (don't downgrade — Razorpay retries) ──
       case 'payment.failed': {
         const payment = payload.payment?.entity;
-        console.log(`Payment failed: ${payment?.id}`);
+        console.log(`[Webhook] ❌ Payment failed: ${(payment?.id as string) || 'unknown'}`);
+        // Razorpay will retry automatically and send subscription.halted if all retries fail
         break;
       }
 
       default:
-        console.log(`Unhandled webhook event: ${eventType}`);
+        console.log(`[Webhook] Unhandled event: ${eventType}`);
     }
-
-    return NextResponse.json({ received: true });
-  } catch (error) {
-    console.error('Webhook processing error:', error);
-    return NextResponse.json(
-      { error: 'Webhook processing failed' },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error('[Webhook] Processing error:', err);
+    // Return 200 anyway to prevent Razorpay from retrying indefinitely
+    // The error is logged for debugging
   }
+
+  return json({ received: true });
 }
