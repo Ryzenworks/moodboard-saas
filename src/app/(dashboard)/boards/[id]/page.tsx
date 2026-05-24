@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, Search } from 'lucide-react';
 import Link from 'next/link';
@@ -14,14 +14,14 @@ import { ContextMenu } from '@/components/board/context-menu';
 import { TagModal } from '@/components/board/tag-modal';
 import { SelectionBar } from '@/components/board/selection-bar';
 import { boardsService } from '@/services/boards';
-import { imagesService, type UploadProgress } from '@/services/images';
+import { imagesService } from '@/services/images';
 import { categoriesService } from '@/services/categories';
 import { useBoardStore } from '@/store/board';
 import { useAuthStore } from '@/store/auth';
 import { useSubscriptionStore } from '@/store/subscription';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard';
 import { usePlan } from '@/hooks/use-plan';
-import { extractPaletteFromUrl } from '@/utils/palette';
+import { useUploadManager } from '@/hooks/use-upload-manager';
 import { downloadFile } from '@/utils/download';
 import { UpgradeModal } from '@/components/billing/upgrade-modal';
 import { useBoardsStore } from '@/store/boards';
@@ -35,9 +35,10 @@ export default function BoardDetailPage() {
   const params = useParams();
   const boardId = params.id as string;
   const user = useAuthStore((s) => s.user);
-  const { checkUploadLimit, trimUploadBatch, uploadsRemaining } = usePlan();
+  const { uploadsRemaining } = usePlan();
   const incrementImageCount = useSubscriptionStore((s) => s.incrementImageCount);
   const updateBoardInList = useBoardsStore((s) => s.updateBoard);
+  const { upload: handleUpload, cancelItem, cancelAll, isUploading } = useUploadManager(boardId, user?.id);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [noteModalImage, setNoteModalImage] = useState<{ id: string; note: string; url: string; filename: string } | null>(null);
   const [newCatModalOpen, setNewCatModalOpen] = useState(false);
@@ -51,7 +52,6 @@ export default function BoardDetailPage() {
     categories,
     selected,
     setImages,
-    addImage,
     updateImage,
     removeImage,
     setCategories,
@@ -72,8 +72,6 @@ export default function BoardDetailPage() {
 
   const [board, setBoard] = useState<Board | null>(null);
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
   const [lightboxId, setLightboxId] = useState<string | null>(null);
   const [tagModalImageId, setTagModalImageId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -163,180 +161,7 @@ export default function BoardDetailPage() {
     },
   });
 
-  // ─── Upload (dedup + concurrency queue) ─────────────
-  const MAX_CONCURRENT = 3;
-  const [skippedCount, setSkippedCount] = useState(0);
-  const [limitMessage, setLimitMessage] = useState('');
 
-  // In-flight lock — prevents concurrent uploads of the same fingerprint
-  const inflightFingerprints = useRef(new Set<string>());
-
-  // Canonical fingerprint from a File object
-  function fileFingerprint(file: File): string {
-    return `${file.name}::${file.size}::${file.lastModified}`;
-  }
-
-  // Check against store images (fast, in-memory)
-  function isInStore(fp: string): boolean {
-    const imgs = useBoardStore.getState().images;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return imgs.some((img: any) => img.fingerprint === fp);
-  }
-
-  const handleUpload = useCallback(
-    async (files: File[]) => {
-      if (!user || uploading) return;
-
-      // ── Phase 1: Fast dedup (in-batch + store + in-flight) ──
-      const batchSeen = new Set<string>();
-      const candidates: { file: File; fp: string }[] = [];
-      let dupes = 0;
-
-      for (const file of files) {
-        const fp = fileFingerprint(file);
-
-        if (batchSeen.has(fp)) {
-          console.log(`[DuplicateCheck] SKIP (batch dupe) fp=${fp}`);
-          dupes++;
-          continue;
-        }
-        if (inflightFingerprints.current.has(fp)) {
-          console.log(`[DuplicateCheck] SKIP (in-flight) fp=${fp}`);
-          dupes++;
-          continue;
-        }
-        if (isInStore(fp)) {
-          console.log(`[DuplicateCheck] SKIP (store match) fp=${fp}`);
-          dupes++;
-          continue;
-        }
-
-        batchSeen.add(fp);
-        candidates.push({ file, fp });
-      }
-
-      // ── Phase 2: DB-level dedup (cross-tab safety) ──
-      const unique: { file: File; fp: string }[] = [];
-      for (const c of candidates) {
-        try {
-          const existsInDB = await imagesService.checkDuplicate(boardId, c.fp);
-          if (existsInDB) {
-            console.log(`[DuplicateCheck] SKIP (DB match) fp=${c.fp}`);
-            dupes++;
-            continue;
-          }
-        } catch {
-          // Fail open — don't block upload on DB check failure
-        }
-        unique.push(c);
-      }
-
-      if (dupes > 0) {
-        setSkippedCount(dupes);
-        setTimeout(() => setSkippedCount(0), 3000);
-      }
-      if (unique.length === 0) return;
-
-      // ── Phase 3: Plan limit enforcement (Option A — partial upload) ──
-      const trimResult = trimUploadBatch(unique.map(u => u.file));
-      if (trimResult.allowed.length === 0) {
-        // Fully blocked
-        setUpgradeOpen(true);
-        if (trimResult.message) {
-          setLimitMessage(trimResult.message);
-          setTimeout(() => setLimitMessage(''), 5000);
-        }
-        return;
-      }
-
-      // Trim the unique array to only allowed files
-      let trimmed = unique;
-      if (trimResult.rejected > 0) {
-        const allowedNames = new Set(trimResult.allowed.map(f => f.name));
-        trimmed = unique.filter(u => allowedNames.has(u.file.name)).slice(0, trimResult.allowed.length);
-        const msg = trimResult.message || `${trimResult.allowed.length} uploaded · ${trimResult.rejected} skipped (limit reached)`;
-        setLimitMessage(msg);
-        setTimeout(() => setLimitMessage(''), 5000);
-      }
-
-      setUploading(true);
-      const progressMap: Record<string, UploadProgress> = {};
-      let lastProgressUpdate = 0;
-
-      for (const { file } of trimmed) {
-        progressMap[file.name] = { filename: file.name, progress: 0, status: 'pending' };
-      }
-      setUploadProgress(Object.values(progressMap));
-
-      // ── Phase 4: Concurrency-limited queue ──
-      let nextIdx = 0;
-      let active = 0;
-      let completed = 0;
-
-      async function processOne(item: { file: File; fp: string }) {
-        const { file, fp } = item;
-        // Acquire in-flight lock
-        inflightFingerprints.current.add(fp);
-        active++;
-
-        try {
-          const img = await imagesService.upload(file, boardId, user!.id, (p) => {
-            progressMap[file.name] = p;
-            const now = Date.now();
-            if (now - lastProgressUpdate > 60 || p.status !== 'uploading') {
-              lastProgressUpdate = now;
-              setUploadProgress(Object.values(progressMap));
-            }
-          }, fp); // Pass fingerprint to service for DB persistence
-
-          addImage(img);
-          const newCount = useBoardStore.getState().images.length;
-          updateBoardInList(boardId, { image_count: newCount });
-          incrementImageCount(1);
-          boardsService.syncImageCount(boardId, newCount).catch(() => {});
-
-          // Palette (background, non-blocking)
-          extractPaletteFromUrl(img.url)
-            .then(async (palette) => {
-              if (palette.length) {
-                updateImage(img.id, { palette });
-                try { await imagesService.updatePalette(img.id, palette); }
-                catch { /* non-critical */ }
-              }
-            })
-            .catch(() => {});
-        } catch (err) {
-          console.error('[Upload] Failed:', file.name, err);
-          progressMap[file.name] = {
-            filename: file.name, progress: 0, status: 'error',
-            error: err instanceof Error ? err.message : 'Upload failed',
-          };
-          setUploadProgress(Object.values(progressMap));
-        } finally {
-          // Release in-flight lock
-          inflightFingerprints.current.delete(fp);
-        }
-
-        active--;
-        completed++;
-        processQueue();
-      }
-
-      function processQueue() {
-        while (active < MAX_CONCURRENT && nextIdx < trimmed.length) {
-          const item = trimmed[nextIdx++];
-          processOne(item);
-        }
-        if (completed >= trimmed.length) {
-          setTimeout(() => setUploadProgress([]), 2000);
-          setUploading(false);
-        }
-      }
-
-      processQueue();
-    },
-    [user, boardId, uploading, addImage, updateImage, trimUploadBatch, updateBoardInList, incrementImageCount]
-  );
 
   // ─── Clipboard paste upload (Ctrl/Cmd + V) ─────────
   const handleUploadRef = useRef(handleUpload);
@@ -528,7 +353,7 @@ export default function BoardDetailPage() {
         actions={
           <div className="flex items-center gap-2">
             <SortControl />
-            <UploadZone onDrop={handleUpload} uploading={uploading} progress={uploadProgress} skippedCount={skippedCount} limitMessage={limitMessage} uploadsRemaining={uploadsRemaining} compact />
+            <UploadZone onDrop={handleUpload} onCancelItem={cancelItem} onCancelAll={cancelAll} uploadsRemaining={uploadsRemaining} compact />
           </div>
         }
       />
@@ -577,7 +402,7 @@ export default function BoardDetailPage() {
             ))}
           </div>
         ) : images.length === 0 ? (
-          <UploadZone onDrop={handleUpload} uploading={uploading} progress={uploadProgress} uploadsRemaining={uploadsRemaining} />
+          <UploadZone onDrop={handleUpload} uploadsRemaining={uploadsRemaining} />
         ) : displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-sm text-white/30 mb-2">No images match your filters</p>
