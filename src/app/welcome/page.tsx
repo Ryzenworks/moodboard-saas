@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Puzzle,
   ArrowRight,
   Check,
   Sparkles,
@@ -13,14 +12,13 @@ import {
   Layers,
   MousePointer2,
   Download,
-  Zap,
-  Crown,
   RefreshCw,
   Copy,
   CheckCircle2,
   ExternalLink,
 } from 'lucide-react';
 import { MoodboardLogo } from '@/components/ui/logo';
+import { PlanCard } from '@/components/billing/plan-card';
 import { useAuthStore } from '@/store/auth';
 import { profileService } from '@/services/profile';
 import { useExtension } from '@/hooks/use-extension';
@@ -332,64 +330,35 @@ export default function WelcomePage() {
                 Start free, upgrade anytime.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md mx-auto mb-6">
-                {/* Free */}
-                <div className="flex flex-col p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-left">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Zap className="w-4 h-4 text-white/30" />
-                    <span className="text-sm font-semibold text-white/70">Free</span>
-                  </div>
-                  <p className="text-2xl font-bold text-white mb-1">₹0</p>
-                  <p className="text-[11px] text-white/20 mb-5">Forever free</p>
-                  <ul className="space-y-2.5 flex-1">
-                    {['1 board', '50 uploads', '500 MB storage', 'Basic support'].map((f) => (
-                      <li key={f} className="flex items-center gap-2 text-xs text-white/40">
-                        <Check className="w-3.5 h-3.5 text-white/20 flex-shrink-0" />
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                  <button
-                    onClick={handleContinueFree}
-                    disabled={completing}
-                    className="w-full mt-6 h-[42px] flex items-center justify-center rounded-xl bg-white/[0.04] border border-white/[0.08] text-sm font-medium text-white/50 hover:text-white hover:bg-white/[0.08] transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    {completing ? 'Setting up...' : 'Continue with Free'}
-                  </button>
-                </div>
-
-                {/* Pro */}
-                <div className="flex flex-col p-5 rounded-2xl bg-accent/[0.04] border border-accent/20 text-left relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-accent/[0.08] rounded-full blur-[40px] pointer-events-none" />
-                  <div className="relative flex items-center gap-2 mb-4">
-                    <Crown className="w-4 h-4 text-accent" />
-                    <span className="text-sm font-semibold text-accent">Pro</span>
-                    <span className="ml-auto text-[9px] font-medium px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">
-                      RECOMMENDED
-                    </span>
-                  </div>
-                  <p className="text-2xl font-bold text-white mb-1">
-                    ₹799
-                    <span className="text-sm font-normal text-white/30">/mo</span>
-                  </p>
-                  <p className="text-[11px] text-white/20 mb-5">Cancel anytime</p>
-                  <ul className="space-y-2.5 flex-1">
-                    {['10 boards', 'Unlimited uploads', 'Unlimited storage', 'Priority features'].map(
-                      (f) => (
-                        <li key={f} className="flex items-center gap-2 text-xs text-white/60">
-                          <Check className="w-3.5 h-3.5 text-accent flex-shrink-0" />
-                          {f}
-                        </li>
-                      )
-                    )}
-                  </ul>
-                  <button
-                    onClick={handleUpgrade}
-                    className="w-full mt-6 h-[42px] flex items-center justify-center rounded-xl bg-accent hover:bg-accent/90 text-white text-sm font-medium transition-all cursor-pointer"
-                  >
-                    Upgrade to Pro
-                  </button>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md mx-auto mb-6">
+                <PlanCard
+                  name="Free"
+                  price="Free"
+                  features={[
+                    '1 board',
+                    '50 uploads',
+                    '500 MB storage',
+                    'Browser extension',
+                    'Real-time sync',
+                  ]}
+                  onSelect={handleContinueFree}
+                  loading={completing}
+                  ctaLabel="Continue Free"
+                />
+                <PlanCard
+                  name="Pro"
+                  price="₹499"
+                  period="/month"
+                  recommended
+                  features={[
+                    'Up to 10 boards',
+                    'Unlimited uploads',
+                    'Unlimited storage',
+                    'Multi-board workflow',
+                    'Priority support',
+                  ]}
+                  onSelect={handleUpgrade}
+                />
               </div>
 
               <button

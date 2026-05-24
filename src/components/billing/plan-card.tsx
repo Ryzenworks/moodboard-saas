@@ -14,6 +14,8 @@ interface PlanCardProps {
   recommended?: boolean;
   onSelect?: () => void;
   loading?: boolean;
+  /** Override default CTA label */
+  ctaLabel?: string;
 }
 
 export function PlanCard({
@@ -25,6 +27,7 @@ export function PlanCard({
   recommended = false,
   onSelect,
   loading = false,
+  ctaLabel,
 }: PlanCardProps) {
   return (
     <motion.div
@@ -108,7 +111,7 @@ export function PlanCard({
             loading={loading}
             className="!h-9 !text-[12px]"
           >
-            {recommended ? 'Upgrade to Pro' : 'Downgrade'}
+            {ctaLabel || (recommended ? 'Upgrade to Pro' : 'Downgrade')}
           </Button>
         )}
       </div>
