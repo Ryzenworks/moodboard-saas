@@ -101,18 +101,11 @@ export function UpgradeModal({ open, onClose, trigger }: UpgradeModalProps) {
           setLoading(false);
           onClose();
         } else if (attempts >= maxAttempts) {
-          // Timeout — webhook might be delayed
+          // Webhook hasn't arrived yet — don't fake the upgrade
           if (pollRef.current) clearInterval(pollRef.current);
           setSyncing(false);
           setLoading(false);
-          // Optimistic upgrade — webhook will confirm
-          setSubscription({
-            plan: 'pro',
-            status: 'active',
-            razorpaySubscriptionId: null,
-            currentPeriodEnd: null,
-          });
-          onClose();
+          setError('Your payment is being processed. Your plan will update shortly — please refresh the page in a minute.');
         }
       } catch {
         // Network error — keep polling

@@ -24,9 +24,14 @@ import { createClient as createAdminClient } from '@supabase/supabase-js';
  */
 
 // Admin client — webhooks have no user session
+// MUST use service role key in production to bypass RLS
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!serviceRoleKey && process.env.NODE_ENV === 'production') {
+  console.error('[Webhook] ❌ SUPABASE_SERVICE_ROLE_KEY is required in production!');
+}
 const supabaseAdmin = createAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  serviceRoleKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 function json(data: unknown, status = 200) {
@@ -72,8 +77,13 @@ export async function POST(request: Request) {
 
     console.log('[Webhook] ✅ Signature verified');
   } else {
-    // DEV mode: allow without signature (log warning)
-    console.warn('[Webhook] ⚠️ DEV MODE — No RAZORPAY_WEBHOOK_SECRET configured, skipping signature verification');
+    // FAIL CLOSED in production — reject if no secret configured
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[Webhook] ❌ RAZORPAY_WEBHOOK_SECRET not configured in production!');
+      return json({ error: 'Webhook not configured' }, 500);
+    }
+    // DEV mode only: allow without signature
+    console.warn('[Webhook] ⚠️ DEV MODE — skipping signature verification');
   }
 
   // ── Parse event ──
