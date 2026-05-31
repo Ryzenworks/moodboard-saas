@@ -23,6 +23,7 @@ import { useAuthStore } from '@/store/auth';
 import { profileService } from '@/services/profile';
 import { useExtension } from '@/hooks/use-extension';
 import { UpgradeModal } from '@/components/billing/upgrade-modal';
+import { useSubscriptionStore } from '@/store/subscription';
 
 const STEPS = ['welcome', 'extension', 'plans', 'demo'] as const;
 type Step = (typeof STEPS)[number];
@@ -55,14 +56,14 @@ export default function WelcomePage() {
     }
   }, [user, loading, router]);
 
-  function handleContinueFree() {
+  async function handleContinueFree() {
     if (!user || completing) return;
     setCompleting(true);
 
-    // Synchronous — sets cookie immediately (middleware reads this)
-    profileService.completeOnboarding(user.id);
+    // Sets cookie immediately + awaits reliable DB update with retry
+    await profileService.completeOnboarding(user.id);
 
-    // Navigate immediately — prefetch cache makes this fast
+    // Navigate — cookie is already set so middleware won't redirect back
     router.push('/boards');
   }
 
@@ -488,7 +489,20 @@ export default function WelcomePage() {
         </button>
       </div>
 
-      <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} trigger="onboarding" />
+      <UpgradeModal
+        open={upgradeOpen}
+        onClose={async () => {
+          setUpgradeOpen(false);
+          // If upgrade succeeded (plan is now pro), complete onboarding and go to dashboard
+          const currentPlan = useSubscriptionStore.getState().plan;
+          if (currentPlan === 'pro' && user) {
+            setCompleting(true);
+            await profileService.completeOnboarding(user.id);
+            router.push('/boards');
+          }
+        }}
+        trigger="onboarding"
+      />
 
     </div>
   );

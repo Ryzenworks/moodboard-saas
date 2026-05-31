@@ -55,27 +55,50 @@ export async function updateSession(request: NextRequest) {
   // Only for authenticated users on dashboard routes (not /welcome, /api, /auth)
   if (user && !isAuthPage && !isPublicPage && !isApiRoute && !isWelcomePage && !isExtAuthPage) {
     // FAST PATH: cookie bypass — set by client when onboarding is completed
-    // This prevents the deadlock where DB update fails but user should still proceed
     const onboardedCookie = request.cookies.get('moodboard_onboarded');
     if (onboardedCookie?.value === '1') {
-      // User has completed onboarding (cookie set by client)
       return supabaseResponse;
     }
 
+    // No cookie — check DB as authoritative source
     try {
-      const { data: profile } = await supabase
+      const { data: profile, error } = await supabase
         .from('profiles')
         .select('onboarding_complete')
         .eq('id', user.id)
         .single();
 
-      if (profile && profile.onboarding_complete === false) {
+      if (error || !profile) {
+        // No profile row or query failed — fail open, don't block returning users
+        // Self-heal: set the cookie so we don't hit DB again
+        supabaseResponse.cookies.set('moodboard_onboarded', '1', {
+          path: '/',
+          maxAge: 31536000,
+          sameSite: 'lax',
+        });
+        return supabaseResponse;
+      }
+
+      if (profile.onboarding_complete === true) {
+        // DB confirms onboarding is done — self-heal the missing cookie
+        // so future requests skip the DB query entirely
+        supabaseResponse.cookies.set('moodboard_onboarded', '1', {
+          path: '/',
+          maxAge: 31536000,
+          sameSite: 'lax',
+        });
+        return supabaseResponse;
+      }
+
+      if (profile.onboarding_complete === false) {
+        // Onboarding genuinely not completed — redirect to /welcome
         const url = request.nextUrl.clone();
         url.pathname = '/welcome';
         return NextResponse.redirect(url);
       }
     } catch {
       // Fail open — don't block navigation if profile check fails
+      return supabaseResponse;
     }
   }
 

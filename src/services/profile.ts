@@ -29,33 +29,44 @@ export const profileService = {
   /**
    * Mark onboarding as complete.
    * Sets a client-side cookie immediately (middleware reads this),
-   * then attempts DB update (may fail if column/migration missing — that's OK).
+   * then performs a reliable DB update with retry.
+   * Both must succeed for cross-browser/device correctness.
    */
-  completeOnboarding(userId: string): boolean {
+  async completeOnboarding(userId: string): Promise<boolean> {
     // 1. Set cookie IMMEDIATELY — this is what the middleware reads
     if (typeof document !== 'undefined') {
       document.cookie = 'moodboard_onboarded=1; path=/; max-age=31536000; SameSite=Lax';
       console.log('[Profile] Onboarding cookie set ✓');
     }
 
-    // 2. Attempt DB update in background — non-blocking
+    // 2. Reliable DB update — await with retry
     const supabase = createClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase.from('profiles') as any)
-      .update({ onboarding_complete: true })
-      .eq('id', userId)
-      .then(({ error }: { error: { message: string } | null }) => {
-        if (error) {
-          console.warn('[Profile] DB onboarding update failed (non-critical):', error.message);
-        } else {
-          console.log('[Profile] DB onboarding update ✓');
-        }
-      })
-      .catch((err: unknown) => {
-        console.warn('[Profile] DB onboarding update exception:', err);
-      });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase.from('profiles') as any)
+          .update({ onboarding_complete: true })
+          .eq('id', userId);
 
-    return true; // Always succeeds — cookie is the source of truth
+        if (!error) {
+          console.log('[Profile] DB onboarding update ✓');
+          return true;
+        }
+
+        console.warn(`[Profile] DB onboarding update attempt ${attempt}/3 failed:`, error.message);
+      } catch (err) {
+        console.warn(`[Profile] DB onboarding update attempt ${attempt}/3 exception:`, err);
+      }
+
+      // Wait briefly before retry
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+    }
+
+    // DB update failed after 3 attempts — cookie still works for this browser
+    console.error('[Profile] DB onboarding update failed after 3 attempts. Cookie fallback in effect.');
+    return false;
   },
 
   async generateExtensionToken(userId: string): Promise<string> {
