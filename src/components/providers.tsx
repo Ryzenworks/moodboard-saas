@@ -9,7 +9,7 @@ import { subscriptionService } from '@/services/subscription';
 export function Providers({ children }: { children: React.ReactNode }) {
   const setUser = useAuthStore((s) => s.setUser);
   const setSubscription = useSubscriptionStore((s) => s.setSubscription);
-  const setUsage = useSubscriptionStore((s) => s.setUsage);
+  const reconcileUsage = useSubscriptionStore((s) => s.reconcileUsage);
   const initRef = useRef(false);
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
               currentPeriodEnd: null,
             });
           }
-          setUsage(usage.boards, usage.images);
+          reconcileUsage(usage.boards, usage.images);
         })
         .catch(() => {
           setSubscription({
@@ -98,7 +98,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, [setUser, setSubscription, setUsage]);
+  }, [setUser, setSubscription, reconcileUsage]);
 
   return <>{children}</>;
 }

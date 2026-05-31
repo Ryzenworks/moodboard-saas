@@ -11,6 +11,13 @@ interface SubscriptionState {
   imageCount: number;
   loading: boolean;
 
+  /**
+   * Tracks in-flight optimistic increments not yet reflected in the DB.
+   * Reset to 0 by setUsage() and reconcileUsage() when authoritative
+   * DB counts arrive.
+   */
+  _optimisticDelta: number;
+
   // Actions
   setPlan: (plan: PlanType) => void;
   setSubscription: (data: {
@@ -19,9 +26,25 @@ interface SubscriptionState {
     razorpaySubscriptionId: string | null;
     currentPeriodEnd: string | null;
   }) => void;
+
+  /**
+   * Hard set usage — ONLY for initial hydration before any uploads.
+   * Resets the optimistic delta.
+   */
   setUsage: (boards: number, images: number) => void;
-  /** Atomic increment/decrement — prevents race conditions */
+
+  /**
+   * DB-authoritative usage reconciliation — used when navigating to boards
+   * list or on app hydration. Trusts the DB count and resets optimistic delta.
+   */
+  reconcileUsage: (boards: number, dbImages: number) => void;
+
+  /** Atomic increment — called on each successful upload */
   incrementImageCount: (delta: number) => void;
+
+  /** Atomic decrement — called on upload failure/cancel rollback */
+  decrementImageCount: (delta: number) => void;
+
   setBoardCount: (count: number) => void;
   setLoading: (loading: boolean) => void;
 
@@ -42,8 +65,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   boardCount: 0,
   imageCount: 0,
   loading: true,
+  _optimisticDelta: 0,
 
   setPlan: (plan) => set({ plan }),
+
   setSubscription: (data) =>
     set({
       plan: data.plan,
@@ -52,13 +77,49 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       currentPeriodEnd: data.currentPeriodEnd,
       loading: false,
     }),
-  setUsage: (boards, images) => set({ boardCount: boards, imageCount: images }),
+
+  setUsage: (boards, images) =>
+    set({
+      boardCount: boards,
+      imageCount: images,
+      _optimisticDelta: 0,
+    }),
+
+  reconcileUsage: (boards, dbImages) =>
+    set(() => {
+      // Trust the DB as authoritative.
+      // reconcileUsage is called from boards page load and app hydration —
+      // contexts where the DB has had time to catch up.
+      // Reset _optimisticDelta to prevent stale delta from inflating future counts.
+      console.log(`[CountSync] reconcile: db=${dbImages} → using DB as authoritative`);
+
+      return {
+        boardCount: boards,
+        imageCount: dbImages,
+        _optimisticDelta: 0,
+      };
+    }),
+
   incrementImageCount: (delta) =>
     set((s) => {
       const next = Math.max(0, s.imageCount + delta);
-      console.log(`[CountSync] imageCount: ${s.imageCount} → ${next} (delta: ${delta})`);
-      return { imageCount: next };
+      console.log(`[CountSync] imageCount: ${s.imageCount} → ${next} (delta: +${delta})`);
+      return {
+        imageCount: next,
+        _optimisticDelta: s._optimisticDelta + delta,
+      };
     }),
+
+  decrementImageCount: (delta) =>
+    set((s) => {
+      const next = Math.max(0, s.imageCount - delta);
+      console.log(`[CountSync] imageCount: ${s.imageCount} → ${next} (delta: -${delta})`);
+      return {
+        imageCount: next,
+        _optimisticDelta: Math.max(0, s._optimisticDelta - delta),
+      };
+    }),
+
   setBoardCount: (count) => set({ boardCount: count }),
   setLoading: (loading) => set({ loading }),
 

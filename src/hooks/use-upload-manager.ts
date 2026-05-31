@@ -7,6 +7,7 @@ import { useSubscriptionStore } from '@/store/subscription';
 import { useBoardsStore } from '@/store/boards';
 import { imagesService } from '@/services/images';
 import { boardsService } from '@/services/boards';
+import { subscriptionService } from '@/services/subscription';
 import { extractPaletteFromUrl } from '@/utils/palette';
 import { PLAN_LIMITS } from '@/types';
 import type { UploadItem } from '@/store/upload';
@@ -53,7 +54,6 @@ export function useUploadManager(boardId: string, userId: string | undefined) {
   const store = useUploadStore;
   const addImage = useBoardStore((s) => s.addImage);
   const updateImage = useBoardStore((s) => s.updateImage);
-  const incrementImageCount = useSubscriptionStore((s) => s.incrementImageCount);
   const updateBoardInList = useBoardsStore((s) => s.updateBoard);
 
   // Ref to track if the executor loop is running
@@ -97,6 +97,17 @@ export function useUploadManager(boardId: string, userId: string | undefined) {
 
     if (pending.length === 0 && state.batchStatus === 'uploading') {
       state.setBatchStatus('done');
+
+      // ── Authoritative DB count reconciliation ──
+      // After every batch, query the DB for the TRUE count.
+      // This corrects any drift from race conditions, retries, or realtime duplication.
+      if (userId) {
+        subscriptionService.getUsage(userId).then((usage) => {
+          useSubscriptionStore.getState().setUsage(usage.boards, usage.images);
+          console.log(`[CountSync] authoritative reconcile: boards=${usage.boards} images=${usage.images}`);
+        }).catch(() => { /* non-critical */ });
+      }
+
       setTimeout(() => {
         const current = store.getState();
         if (current.batchStatus === 'done') {
@@ -104,7 +115,8 @@ export function useUploadManager(boardId: string, userId: string | undefined) {
         }
       }, 3000);
     }
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   // ── Process a single upload item ──
   const processItem = useCallback(async (item: UploadItem) => {
@@ -166,10 +178,16 @@ export function useUploadManager(boardId: string, userId: string | undefined) {
 
       // Success
       markCompleted(item.id, img);
-      addImage(img);
-      incrementImageCount(1);
 
-      // Sync counts (non-blocking)
+      // Only increment usage if this image is actually new to the store.
+      // Prevents double-counting when Realtime INSERT fires before this callback.
+      const alreadyInStore = useBoardStore.getState().images.some((i) => i.id === img.id);
+      addImage(img);
+      if (!alreadyInStore) {
+        useSubscriptionStore.getState().incrementImageCount(1);
+      }
+
+      // Sync board-level count (non-blocking)
       const newCount = useBoardStore.getState().images.length;
       updateBoardInList(boardId, { image_count: newCount });
       boardsService.syncImageCount(boardId, newCount).catch(() => {});
@@ -193,7 +211,7 @@ export function useUploadManager(boardId: string, userId: string | undefined) {
       onItemFinished();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boardId, userId, addImage, updateImage, incrementImageCount, updateBoardInList, processQueue]);
+  }, [boardId, userId, addImage, updateImage, updateBoardInList, processQueue]);
 
   // ── Called when any item finishes (success, fail, blocked) ──
   const onItemFinished = useCallback(() => {

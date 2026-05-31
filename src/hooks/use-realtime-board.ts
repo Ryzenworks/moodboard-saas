@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useBoardStore } from '@/store/board';
 import { useSubscriptionStore } from '@/store/subscription';
+import { subscriptionService } from '@/services/subscription';
 import { imagesService } from '@/services/images';
 import type { Image } from '@/types';
 
@@ -13,10 +14,14 @@ import type { Image } from '@/types';
  * 
  * When a new image is inserted (e.g. from extension), it's automatically
  * added to the board store — the masonry grid updates instantly.
+ *
+ * IMPORTANT: This hook does NOT increment imageCount directly.
+ * Usage counting is handled by the upload manager (for dashboard uploads)
+ * or by authoritative DB reconciliation (for extension uploads).
+ * This prevents double-counting race conditions.
  */
-export function useRealtimeBoard(boardId: string) {
+export function useRealtimeBoard(boardId: string, userId?: string) {
   const addImage = useBoardStore((s) => s.addImage);
-  const incrementImageCount = useSubscriptionStore((s) => s.incrementImageCount);
   const realtimeWorking = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -25,10 +30,19 @@ export function useRealtimeBoard(boardId: string) {
       const existing = useBoardStore.getState().images;
       if (existing.some((img) => img.id === newImage.id)) return;
       addImage(newImage);
-      incrementImageCount(1);
+
+      // For images arriving via Realtime (e.g. extension uploads),
+      // do an authoritative DB count refresh instead of optimistic increment.
+      // This is slightly slower but mathematically correct.
+      if (userId) {
+        subscriptionService.getUsage(userId).then((usage) => {
+          useSubscriptionStore.getState().setUsage(usage.boards, usage.images);
+        }).catch(() => { /* non-critical */ });
+      }
+
       console.log('[Realtime] Image added:', newImage.id);
     },
-    [addImage, incrementImageCount]
+    [addImage, userId]
   );
 
   useEffect(() => {

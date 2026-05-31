@@ -34,7 +34,7 @@ export default function BoardsPage() {
   const setLoading = useBoardsStore((s) => s.setLoading);
 
   const user = useAuthStore((s) => s.user);
-  const setUsage = useSubscriptionStore((s) => s.setUsage);
+  const reconcileUsage = useSubscriptionStore((s) => s.reconcileUsage);
   const setBoardCount = useSubscriptionStore((s) => s.setBoardCount);
   const { checkBoardLimit } = usePlan();
 
@@ -51,7 +51,7 @@ export default function BoardsPage() {
         setBoards(data);
         // Derive total image count from boards' image_count
         const totalImages = data.reduce((sum, b) => sum + (b.image_count || 0), 0);
-        setUsage(data.length, totalImages);
+        reconcileUsage(data.length, totalImages);
       } catch {
         // Don't wipe existing boards on error — only set empty if never initialized
         if (!initialized) setBoards([]);

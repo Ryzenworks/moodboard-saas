@@ -134,7 +134,7 @@ export default function BoardDetailPage() {
   }, [boardId]);
 
   // ─── Realtime sync (extension uploads appear instantly) ───
-  useRealtimeBoard(boardId);
+  useRealtimeBoard(boardId, user?.id);
 
   // ─── Listen for upgrade trigger from UploadZone ───
   useEffect(() => {
