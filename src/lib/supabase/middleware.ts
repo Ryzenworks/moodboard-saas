@@ -32,13 +32,14 @@ export async function updateSession(request: NextRequest) {
 
   // Protected routes: redirect to login if not authenticated
   const path = request.nextUrl.pathname;
-  const isAuthPage = path.startsWith('/login') || path.startsWith('/signup');
+  const isAuthPage = path.startsWith('/login') || path.startsWith('/signup') || path.startsWith('/forgot-password');
   const isPublicPage = path === '/' || path.startsWith('/auth/');
   const isApiRoute = path.startsWith('/api/');
   const isWelcomePage = path === '/welcome';
   const isExtAuthPage = path === '/extension-auth';
+  const isResetPasswordPage = path === '/reset-password';
 
-  if (!user && !isAuthPage && !isPublicPage && !isApiRoute && !isExtAuthPage) {
+  if (!user && !isAuthPage && !isPublicPage && !isApiRoute && !isExtAuthPage && !isResetPasswordPage) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
@@ -53,7 +54,7 @@ export async function updateSession(request: NextRequest) {
 
   // Onboarding redirect — check if user needs onboarding
   // Only for authenticated users on dashboard routes (not /welcome, /api, /auth)
-  if (user && !isAuthPage && !isPublicPage && !isApiRoute && !isWelcomePage && !isExtAuthPage) {
+  if (user && !isAuthPage && !isPublicPage && !isApiRoute && !isWelcomePage && !isExtAuthPage && !isResetPasswordPage) {
     // FAST PATH: cookie bypass — set by client when onboarding is completed
     const onboardedCookie = request.cookies.get('moodboard_onboarded');
     if (onboardedCookie?.value === '1') {

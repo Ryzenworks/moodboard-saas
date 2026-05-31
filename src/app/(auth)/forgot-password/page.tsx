@@ -2,40 +2,63 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useAuth } from '@/hooks/use-auth';
+import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { OAuthButton } from './oauth-button';
-import { Mail, Lock, User } from 'lucide-react';
+import { Mail, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
-export function SignupForm() {
-  const [fullName, setFullName] = useState('');
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [success, setSuccess] = useState(false);
-  const { signUp, loading, error } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const result = await signUp(email, password, fullName);
-    if (result.success) setSuccess(true);
+    setLoading(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      });
+
+      if (resetError) throw resetError;
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
-  if (success) {
+  if (sent) {
     return (
       <div className="w-full max-w-sm mx-auto text-center space-y-4 animate-fade-up">
         <div className="w-16 h-16 rounded-full bg-accent/10 flex items-center justify-center mx-auto">
-          <Mail className="w-8 h-8 text-accent" />
+          <CheckCircle2 className="w-8 h-8 text-accent" />
         </div>
         <h2 className="text-xl font-bold">Check your email</h2>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          We&apos;ve sent a confirmation link to{' '}
+          We&apos;ve sent a password reset link to{' '}
           <span className="text-white font-medium">{email}</span>.
           <br />
-          Click it to activate your account.
+          Click the link in the email to reset your password.
+        </p>
+        <p className="text-xs text-muted leading-relaxed">
+          Didn&apos;t receive the email? Check your spam folder, or{' '}
+          <button
+            type="button"
+            onClick={() => { setSent(false); setError(null); }}
+            className="text-accent hover:text-accent-hover transition-colors cursor-pointer"
+          >
+            try again
+          </button>.
         </p>
         <Link href="/login">
           <Button variant="secondary" className="mt-2">
+            <ArrowLeft className="w-4 h-4" />
             Back to login
           </Button>
         </Link>
@@ -47,37 +70,14 @@ export function SignupForm() {
     <div className="w-full max-w-sm mx-auto space-y-6">
       {/* Header */}
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Reset password</h1>
         <p className="text-sm text-muted-foreground">
-          Start building your visual inspiration boards
+          Enter your email and we&apos;ll send you a reset link
         </p>
-      </div>
-
-      {/* OAuth */}
-      <OAuthButton />
-
-      {/* Divider */}
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-white/[0.08]" />
-        </div>
-        <div className="relative flex justify-center text-xs">
-          <span className="bg-card px-3 text-muted">or continue with email</span>
-        </div>
       </div>
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Input
-          label="Full Name"
-          type="text"
-          placeholder="John Doe"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          icon={<User className="w-4 h-4" />}
-          required
-          autoComplete="name"
-        />
         <Input
           label="Email"
           type="email"
@@ -87,18 +87,7 @@ export function SignupForm() {
           icon={<Mail className="w-4 h-4" />}
           required
           autoComplete="email"
-        />
-        <Input
-          label="Password"
-          type="password"
-          placeholder="Min 6 characters"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          icon={<Lock className="w-4 h-4" />}
-          showPasswordToggle
-          required
-          minLength={6}
-          autoComplete="new-password"
+          autoFocus
         />
 
         {error && (
@@ -108,13 +97,13 @@ export function SignupForm() {
         )}
 
         <Button type="submit" fullWidth loading={loading} className="h-11">
-          Create Account
+          Send Reset Link
         </Button>
       </form>
 
       {/* Footer */}
       <p className="text-center text-sm text-muted-foreground">
-        Already have an account?{' '}
+        Remember your password?{' '}
         <Link
           href="/login"
           className="text-accent hover:text-accent-hover font-medium transition-colors"
