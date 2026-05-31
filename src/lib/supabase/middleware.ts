@@ -44,8 +44,8 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // If logged in and trying to access auth pages, redirect to dashboard
-  if (user && isAuthPage) {
+  // If logged in and trying to access auth pages or landing page, redirect to dashboard
+  if (user && (isAuthPage || path === '/')) {
     const url = request.nextUrl.clone();
     url.pathname = '/boards';
     return NextResponse.redirect(url);

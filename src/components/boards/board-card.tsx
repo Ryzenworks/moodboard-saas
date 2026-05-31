@@ -5,6 +5,7 @@ import { MoreHorizontal, Trash2, Edit3, Image as ImageIcon, Palette } from 'luci
 import type { Board } from '@/types';
 import Link from 'next/link';
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { getBoardColor, BOARD_COLORS } from '@/utils/board-colors';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { PromptModal } from '@/components/ui/prompt-modal';
@@ -30,14 +31,32 @@ export function BoardCard({ board, index, onDelete, onRename, onColorChange }: B
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   const color = useMemo(() => getBoardColor(board.color), [board.color]);
   const { emoji } = useMemo(() => extractEmoji(board.name), [board.name]);
 
+  // Calculate dropdown position when menu opens
+  useEffect(() => {
+    if (menuOpen && menuBtnRef.current) {
+      const rect = menuBtnRef.current.getBoundingClientRect();
+      setMenuPos({
+        top: rect.bottom + 4,
+        left: rect.right - 160, // w-40 = 160px, align right edge
+      });
+    }
+  }, [menuOpen]);
+
+  // Close on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        menuRef.current && !menuRef.current.contains(target) &&
+        menuBtnRef.current && !menuBtnRef.current.contains(target)
+      ) {
         setMenuOpen(false);
         setColorPickerOpen(false);
       }
@@ -46,12 +65,24 @@ export function BoardCard({ board, index, onDelete, onRename, onColorChange }: B
     return () => document.removeEventListener('click', handleClick);
   }, [menuOpen]);
 
+  // Close on scroll (since portaled dropdown won't follow)
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleScroll() {
+      setMenuOpen(false);
+      setColorPickerOpen(false);
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [menuOpen]);
+
   return (
     <>
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: index * 0.04, duration: 0.35, ease: [0.25, 0.1, 0.25, 1] }}
+        className="relative"
       >
         <Link href={`/boards/${board.id}`} className="block group">
           <div className="relative rounded-[18px] overflow-hidden transition-all duration-500 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_20px_60px_-10px_rgba(0,0,0,0.5)]">
@@ -141,94 +172,102 @@ export function BoardCard({ board, index, onDelete, onRename, onColorChange }: B
                   {new Date(board.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 </span>
               </div>
-
-              {/* ── Menu ── */}
-              <div className="absolute top-3 right-3 z-20" ref={menuRef}>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setMenuOpen(!menuOpen);
-                    setColorPickerOpen(false);
-                  }}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-white/8 hover:text-white/45 hover:bg-white/[0.06] transition-all duration-300 cursor-pointer opacity-0 group-hover:opacity-100"
-                >
-                  <MoreHorizontal className="w-4 h-4" />
-                </button>
-
-                {menuOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.96, y: -4 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
-                    className="absolute right-0 top-full mt-1 w-40 bg-[#141414]/95 backdrop-blur-xl border border-white/[0.07] rounded-xl shadow-2xl shadow-black/60 overflow-hidden z-50 py-1"
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setMenuOpen(false);
-                        setRenameOpen(true);
-                      }}
-                      className="flex items-center gap-2.5 w-full px-3.5 h-8 text-[12px] text-white/45 hover:text-white hover:bg-white/[0.05] transition-all cursor-pointer"
-                    >
-                      <Edit3 className="w-3 h-3" /> Rename
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setColorPickerOpen(!colorPickerOpen);
-                      }}
-                      className="flex items-center gap-2.5 w-full px-3.5 h-8 text-[12px] text-white/45 hover:text-white hover:bg-white/[0.05] transition-all cursor-pointer"
-                    >
-                      <Palette className="w-3 h-3" /> Color
-                    </button>
-
-                    {colorPickerOpen && (
-                      <div className="px-3.5 py-2.5 flex flex-wrap gap-2">
-                        {BOARD_COLORS.map((c) => (
-                          <button
-                            key={c.id}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              onColorChange(board.id, c.id);
-                              setColorPickerOpen(false);
-                              setMenuOpen(false);
-                            }}
-                            title={c.label}
-                            className={`w-5 h-5 rounded-full transition-all duration-200 cursor-pointer border-2 hover:scale-125 ${
-                              board.color === c.id
-                                ? 'border-white scale-110'
-                                : 'border-transparent hover:border-white/30'
-                            }`}
-                            style={{ background: c.swatch }}
-                          />
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="h-px bg-white/[0.05] my-1" />
-
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setMenuOpen(false);
-                        setConfirmOpen(true);
-                      }}
-                      className="flex items-center gap-2.5 w-full px-3.5 h-8 text-[12px] text-danger/60 hover:text-danger hover:bg-danger/5 transition-all cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" /> Delete
-                    </button>
-                  </motion.div>
-                )}
-              </div>
             </div>
           </div>
         </Link>
+
+        {/* ── Menu trigger — OUTSIDE overflow-hidden ── */}
+        <button
+          ref={menuBtnRef}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuOpen(!menuOpen);
+            setColorPickerOpen(false);
+          }}
+          className="absolute top-3 right-3 z-20 w-7 h-7 rounded-lg flex items-center justify-center text-white/8 hover:text-white/45 hover:bg-white/[0.06] transition-all duration-300 cursor-pointer opacity-0 group-hover:opacity-100"
+          style={{ pointerEvents: 'auto' }}
+        >
+          <MoreHorizontal className="w-4 h-4" />
+        </button>
       </motion.div>
+
+      {/* ── Dropdown menu — portaled to body to avoid overflow clipping ── */}
+      {menuOpen && menuPos && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999]"
+          style={{ top: menuPos.top, left: menuPos.left }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
+            className="w-40 bg-[#141414]/95 backdrop-blur-xl border border-white/[0.07] rounded-xl shadow-2xl shadow-black/60 overflow-hidden py-1"
+          >
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                setRenameOpen(true);
+              }}
+              className="flex items-center gap-2.5 w-full px-3.5 h-8 text-[12px] text-white/45 hover:text-white hover:bg-white/[0.05] transition-all cursor-pointer"
+            >
+              <Edit3 className="w-3 h-3" /> Rename
+            </button>
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setColorPickerOpen(!colorPickerOpen);
+              }}
+              className="flex items-center gap-2.5 w-full px-3.5 h-8 text-[12px] text-white/45 hover:text-white hover:bg-white/[0.05] transition-all cursor-pointer"
+            >
+              <Palette className="w-3 h-3" /> Color
+            </button>
+
+            {colorPickerOpen && (
+              <div className="px-3.5 py-2.5 flex flex-wrap gap-2">
+                {BOARD_COLORS.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onColorChange(board.id, c.id);
+                      setColorPickerOpen(false);
+                      setMenuOpen(false);
+                    }}
+                    title={c.label}
+                    className={`w-5 h-5 rounded-full transition-all duration-200 cursor-pointer border-2 hover:scale-125 ${
+                      board.color === c.id
+                        ? 'border-white scale-110'
+                        : 'border-transparent hover:border-white/30'
+                    }`}
+                    style={{ background: c.swatch }}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div className="h-px bg-white/[0.05] my-1" />
+
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                setConfirmOpen(true);
+              }}
+              className="flex items-center gap-2.5 w-full px-3.5 h-8 text-[12px] text-danger/60 hover:text-danger hover:bg-danger/5 transition-all cursor-pointer"
+            >
+              <Trash2 className="w-3 h-3" /> Delete
+            </button>
+          </motion.div>
+        </div>,
+        document.body
+      )}
 
       <ConfirmModal
         open={confirmOpen}
